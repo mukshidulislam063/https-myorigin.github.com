@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Origin‑like Data Lab — X vs Y Editor & Analysis</title>
+<!-- Plotly + PapaParse -->
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<style>
+  :root{--bg:#081226;--card:#0b1220;--muted:#96a0b3;--accent:#38bdf8;--text:#e6eef8}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial;background:linear-gradient(180deg,#061223 0%,var(--bg) 100%);color:var(--text);padding:14px}
+  .wrap{max-width:1200px;margin:0 auto}
+  header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  h1{font-size:1.1rem;margin:0}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+  button{background:#0f1726;border:1px solid #162336;color:var(--text);padding:8px 10px;border-radius:8px;cursor:pointer}
+  .layout{display:grid;grid-template-columns:320px 1fr;gap:12px;margin-top:12px}
+  @media(max-width:980px){.layout{grid-template-columns:1fr}}
+  .card{background:linear-gradient(180deg,#071428 0%,#07122a 100%);border-radius:12px;padding:10px;border:1px solid rgba(255,255,255,0.03)}
+  label{font-size:.85rem;color:var(--muted)}
+  textarea{width:100%;min-height:120px;background:#061626;border:1px solid #123041;color:var(--text);padding:8px;border-radius:8px;font-family:monospace}
+  .row{display:flex;gap:8px;align-items:center;margin-top:8px}
+  select,input[type=number],input[type=text]{background:#061626;border:1px solid #123041;color:var(--text);padding:8px;border-radius:8px}
+  .chart{height:520px}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  th,td{padding:6px;border-bottom:1px solid rgba(255,255,255,0.03);font-size:.9rem}
+  td input{width:100%;background:transparent;border:0;color:var(--text);padding:6px}
+  .small{font-size:.85rem;color:var(--muted)}
+  .controls{display:flex;flex-direction:column;gap:8px}
+  .footer{opacity:.75;text-align:center;margin-top:10px;font-size:.85rem}
+  .badge{display:inline-block;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.02)}
+  .flex{display:flex;gap:8px;align-items:center}
+  .modal{position:fixed;left:0;top:0;right:0;bottom:0;display:none;align-items:center;justify-content:center;background:rgba(2,6,23,0.6)}
+  .modal .box{background:#071428;padding:12px;border-radius:10px;width:360px;border:1px solid #123041}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Origin‑like Data Lab — X vs Y Editor & Analysis</h1>
+      <div class="toolbar">
+        <button id="btnLoadCSV">Load CSV</button>
+        <button id="btnParseFiles">Parse file</button>
+        <input id="fileInput" type="file" accept=".csv,.txt,.dat" style="display:none">
+        <button id="btnExportCSV">Export CSV</button>
+        <button id="btnExportPNG">Export PNG</button>
+        <button id="btnSaveProject">Save Project</button>
+        <button id="btnLoadProject">Load Project</button>
+        <input id="projInput" type="file" accept="application/json" style="display:none">
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="card">
+        <div>
+          <label>Paste X column (one value per line)</label>
+          <textarea id="txtX" placeholder="e.g.\n0.0\n0.1\n0.2\n..."></textarea>
+        </div>
+        <div style="margin-top:8px">
+          <label>Paste Y column (one value per line)</label>
+          <textarea id="txtY" placeholder="e.g.\n1.1\n1.05\n0.98\n..."></textarea>
+        </div>
+        <div class="row">
+          <button id="btnLoadPaste">Load into table</button>
+          <button id="btnClear">Clear</button>
+          <div class="small">Rows: <span id="rowCount">0</span></div>
+        </div>
+
+        <hr style="border-color:rgba(255,255,255,0.03);margin:8px 0">
+
+        <div class="controls">
+          <div>
+            <label class="small">Plot settings</label>
+            <div class="row">
+              <select id="plotMode"><option value="markers">Markers</option><option value="lines">Lines</option><option value="lines+markers">Lines + Markers</option></select>
+              <input id="markerSize" type="number" value="6" min="1" style="width:80px">
+            </div>
+          </div>
+
+          <div>
+            <label class="small">Analysis</label>
+            <div class="row">
+              <select id="fitType"><option value="linear">Linear fit</option><option value="poly2">Poly (2)</option><option value="poly3">Poly (3)</option></select>
+              <button id="btnFit">Fit</button>
+              <button id="btnClearFits">Clear fits</button>
+            </div>
+            <div id="fitInfo" class="small">—</div>
+          </div>
+
+          <div>
+            <label class="small">Transform / Derived</label>
+            <div class="row">
+              <select id="deriveOp"><option value="none">Select op</option><option value="dydx">Derivative dy/dx</option><option value="integral">Integral ∫y dx</option><option value="smooth">Moving average</option></select>
+              <input id="deriveParam" type="number" value="3" min="1" style="width:70px">
+              <button id="btnDerive">Add trace</button>
+            </div>
+          </div>
+
+        </div>
+
+      </aside>
+
+      <main>
+        <section class="card">
+          <div class="flex" style="justify-content:space-between;align-items:flex-end">
+            <div>
+              <div class="small">Figure title</div>
+              <input id="figTitle" type="text" placeholder="Experiment — I–V curve" style="width:320px">
+            </div>
+            <div class="small">Tip: click a point to edit coordinates. Shift+click to add point at cursor.</div>
+          </div>
+          <div id="plot" class="chart"></div>
+
+          <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+            <button id="btnZoomOut">Reset zoom</button>
+            <button id="btnToggleLabels">Toggle labels</button>
+            <button id="btnDeleteSelected">Delete selected points</button>
+            <div class="small">Selected: <span id="selCount">0</span></div>
+          </div>
+
+        </section>
+
+        <section class="card" style="margin-top:12px">
+          <h3 style="margin:0">Data table (editable)</h3>
+          <div style="max-height:260px;overflow:auto;margin-top:8px">
+            <table id="dataTable"><thead><tr><th>#</th><th>X</th><th>Y</th><th></th></tr></thead><tbody></tbody></table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="footer">Made for research — import/paste two-column data (X: voltage, Y: current), edit points, fit, derive, and export. Works offline in any modern browser.</div>
+  </div>
+
+  <!-- edit modal -->
+  <div id="modal" class="modal"><div class="box"><h4>Edit point</h4><div class="row"><label class="small">X</label><input id="editX" type="text"></div><div class="row"><label class="small">Y</label><input id="editY" type="text"></div><div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end"><button id="btnModalSave">Save</button><button id="btnModalCancel">Cancel</button></div></div></div>
+
+<script>
+// Simple Origin-like 2-column data lab with editing + analysis
+let data = []; // array of {x: number, y:number}
+let derived = []; // derived traces
+let fits = [];
+let showLabels = false;
+let selectedPoints = new Set();
+
+const el = id=>document.getElementById(id);
+// helpers
+function parseLines(text){ return text.split(/\r?\n/).map(s=>s.trim()).filter(s=>s.length>0); }
+function toNum(v){ const n=Number(v); return Number.isFinite(n)? n : NaN; }
+
+el('btnLoadCSV').addEventListener('click', ()=> el('fileInput').click());
+el('fileInput').addEventListener('change',(e)=>{
+  const f=e.target.files[0]; if(!f) return; Papa.parse(f, {header:false, dynamicTyping:true, skipEmptyLines:true, complete:(res)=>{
+    // expect two columns
+    const rows = res.data; const xs=[], ys=[];
+    for(const r of rows){ if(r.length>=2){ xs.push(r[0]); ys.push(r[1]); } }
+    loadXY(x => xs, y => ys); // simpler call
+  }});
+});
+
+el('btnLoadPaste').addEventListener('click', ()=>{
+  const xs = parseLines(el('txtX').value); const ys = parseLines(el('txtY').value);
+  if(xs.length !== ys.length){ if(!confirm('X and Y have different lengths — trim to smallest?')) return; }
+  const n=Math.min(xs.length, ys.length);
+  data = []; for(let i=0;i<n;i++){ data.push({x: toNum(xs[i]), y: toNum(ys[i])}); }
+  refreshAll();
+});
+
+el('btnClear').addEventListener('click', ()=>{ data=[]; derived=[]; fits=[]; refreshAll(); });
+
+function loadXY(getX,getY){ // accept functions that return arrays
+  const xs = getX(); const ys = getY(); const n=Math.min(xs.length, ys.length); data = []; for(let i=0;i<n;i++) data.push({x:toNum(xs[i]), y:toNum(ys[i])}); refreshAll(); }
+
+function refreshAll(){ renderTable(); drawPlot(); el('rowCount').textContent = data.length; }
+
+function renderTable(){ const tbody = el('dataTable').querySelector('tbody'); tbody.innerHTML=''; for(let i=0;i<data.length;i++){ const r=data[i]; const tr=document.createElement('tr'); tr.innerHTML = `<td>${i+1}</td><td><input data-i="${i}" data-col="x" value="${isNaN(r.x)?'':r.x}"></td><td><input data-i="${i}" data-col="y" value="${isNaN(r.y)?'':r.y}"></td><td><button data-i="${i}" class="del">Delete</button></td>`; tbody.appendChild(tr); }
+  // events
+  tbody.querySelectorAll('input').forEach(inp=> inp.addEventListener('change', (e)=>{ const i=Number(e.target.dataset.i); const col=e.target.dataset.col; const v=toNum(e.target.value); data[i][col]=v; drawPlot(); }));
+  tbody.querySelectorAll('.del').forEach(b=> b.addEventListener('click',(e)=>{ const i=Number(e.target.dataset.i); data.splice(i,1); refreshAll(); }));
+}
+
+// Plot
+function drawPlot(){
+  const traces = [];
+  const xs = data.map(d=>d.x); const ys = data.map(d=>d.y);
+  traces.push({ x: xs, y: ys, mode: el('plotMode').value, type:'scatter', marker:{ size: Number(el('markerSize').value)||6 }, name:'Data (X vs Y)', text: showLabels ? data.map((p,i)=>`#${i+1}: (${p.x}, ${p.y})`) : undefined });
+  // derived
+  for(const d of derived) traces.push(d);
+  // fits
+  for(const f of fits) traces.push(f.trace);
+  const layout = { title: el('figTitle').value||'X vs Y', xaxis:{title:'X (Voltage)'}, yaxis:{title:'Y (Current)'}, hovermode:'closest' };
+  Plotly.react('plot', traces, layout, {responsive:true});
+}
+
+// clicking and editing
+const plotDiv = el('plot');
+plotDiv.on('plotly_click', function(evt){
+  const pt = evt.points[0]; const i = pt.pointIndex; // index
+  // open modal to edit
+  openEditModal(i);
+});
+
+// shift+click to add point
+plotDiv.on('plotly_click', function(evt){ if(evt.event.shiftKey){ const p=evt.points[0]; const xr=p.xaxis.d2l(p.x); const yr=p.yaxis.d2l(p.y); /* not needed */ } });
+
+// selection
+plotDiv.on('plotly_selected', function(evt){ if(!evt) return; selectedPoints.clear(); for(const trace of evt.points){ selectedPoints.add(trace.pointIndex); } el('selCount').textContent = selectedPoints.size; });
+
+el('btnDeleteSelected').addEventListener('click', ()=>{
+  if(selectedPoints.size===0) return alert('No points selected');
+  const idx = Array.from(selectedPoints).sort((a,b)=>b-a);
+  for(const i of idx) data.splice(i,1);
+  selectedPoints.clear(); el('selCount').textContent='0'; refreshAll();
+});
+
+// modal editing
+function openEditModal(i){ const p = data[i]; el('modal').style.display='flex'; el('editX').value = isNaN(p.x)? '': p.x; el('editY').value = isNaN(p.y)? '': p.y; el('btnModalSave').onclick = ()=>{ data[i].x = toNum(el('editX').value); data[i].y = toNum(el('editY').value); el('modal').style.display='none'; refreshAll(); }; el('btnModalCancel').onclick = ()=>{ el('modal').style.display='none'; } }
+
+// toggle labels
+el('btnToggleLabels').addEventListener('click', ()=>{ showLabels=!showLabels; drawPlot(); });
+
+// fits
+el('btnFit').addEventListener('click', ()=>{
+  if(data.length<2) return alert('Need at least 2 points');
+  const type = el('fitType').value; if(type==='linear') doLinearFit(); else if(type==='poly2') doPolyFit(2); else if(type==='poly3') doPolyFit(3);
+});
+
+function doLinearFit(){ const xs=data.map(d=>d.x); const ys=data.map(d=>d.y); const n=xs.length; const xm=mean(xs), ym=mean(ys); let num=0, den=0; for(let i=0;i<n;i++){ num += (xs[i]-xm)*(ys[i]-ym); den += (xs[i]-xm)**2; } const m = num/den; const b = ym - m*xm; // line y = m x + b
+  const xmin=Math.min(...xs), xmax=Math.max(...xs); const X=[xmin, xmax], Y=[m*xmin+b, m*xmax+b]; const trace = { x:X, y:Y, mode:'lines', name:'Linear fit', line:{dash:'dashdot', width:2} };
+  fits.push({type:'linear', m,b, trace}); el('fitInfo').innerHTML = `y = ${m.toExponential(4)} x + ${b.toExponential(4)}`; drawPlot(); }
+
+function doPolyFit(deg){ const xs=data.map(d=>d.x); const ys=data.map(d=>d.y); const {coeffs, r2} = polyfit(xs, ys, deg); const xmin=Math.min(...xs), xmax=Math.max(...xs); const X=[], Y=[]; const steps=200; for(let i=0;i<=steps;i++){ const t = xmin + (xmax-xmin)*i/steps; X.push(t); Y.push(polyval(coeffs,t)); }
+  const trace = { x:X, y:Y, mode:'lines', name:`Poly${deg} fit`, line:{dash:'dot', width:2} };
+  fits.push({type:'poly'+deg, coeffs, r2, trace}); el('fitInfo').innerHTML = `deg=${deg}, R²=${r2.toFixed(4)}`; drawPlot(); }
+
+function clearFits(){ fits=[]; el('fitInfo').textContent='—'; drawPlot(); }
+el('btnClearFits').addEventListener('click', clearFits);
+
+// derived
+el('btnDerive').addEventListener('click', ()=>{
+  const op=el('deriveOp').value; if(op==='none') return; if(data.length<2) return alert('Need data'); const xs=data.map(d=>d.x), ys=data.map(d=>d.y);
+  if(op==='dydx'){ const X=[], Y=[]; for(let i=1;i<xs.length;i++){ const dx=xs[i]-xs[i-1]; if(dx===0) continue; X.push(xs[i]); Y.push((ys[i]-ys[i-1])/dx); } derived.push({ x:X, y:Y, mode:'lines', name:'dy/dx' }); }
+  if(op==='integral'){ const X=[], Y=[]; let s=0; for(let i=1;i<xs.length;i++){ const dx=xs[i]-xs[i-1]; s += 0.5*(ys[i]+ys[i-1])*dx; X.push(xs[i]); Y.push(s); } derived.push({ x:X, y:Y, mode:'lines', name:'∫y dx' }); }
+  if(op==='smooth'){ const w=Math.max(1, Math.round(Number(el('deriveParam').value)||3)); const X=[], Y=[]; const out=movingAverage(ys,w); for(let i=0;i<out.length;i++){ if(!isNaN(out[i])){ X.push(xs[i]); Y.push(out[i]); } } derived.push({ x:X, y:Y, mode:'lines', name:`smooth(${w})` }); }
+  drawPlot();
+});
+
+function movingAverage(arr,w){ const n=arr.length; const out=new Array(n).fill(NaN); const k=w; let sum=0, q=[]; for(let i=0;i<n;i++){ q.push(arr[i]); sum+=arr[i]; if(q.length>k){ sum-=q.shift(); } if(q.length===k){ out[i]=sum/k; } } return out; }
+
+// export
+el('btnExportCSV').addEventListener('click', ()=>{
+  if(data.length===0) return alert('No data'); let csv='X,Y\n'; for(const d of data) csv += `${d.x},${d.y}\n`; download('data.csv', csv, 'text/csv'); });
+el('btnExportPNG').addEventListener('click', ()=>{ Plotly.downloadImage('plot',{format:'png', filename:'plot'}); });
+
+function download(name, content, mime){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([content],{type:mime})); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 3000); }
+
+// Save/load project
+el('btnSaveProject').addEventListener('click', ()=>{
+  const proj = { data, derived, fits, title: el('figTitle').value }; download('project.json', JSON.stringify(proj), 'application/json'); });
+el('btnLoadProject').addEventListener('click', ()=> el('projInput').click());
+el('projInput').addEventListener('change', (e)=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload= ()=>{ const p=JSON.parse(r.result); data=p.data||[]; derived=p.derived||[]; fits=p.fits||[]; el('figTitle').value=p.title||''; refreshAll(); }; r.readAsText(f); });
+
+// table / plot interactions: enable selection via lasso/box
+// Plotly has built-in lasso/select; we listen to selected event above
+
+// utility: mean
+function mean(a){ return a.reduce((s,v)=>s+v,0)/a.length; }
+
+// polynomial fit functions (same as earlier)
+function polyfit(x, y, deg){ const n=x.length; const m=deg+1; const X = Array.from({length:n}, (_,i)=> Array.from({length:m},(__,j)=> Math.pow(x[i], m-1-j))); const XtX = Array.from({length:m},()=>Array(m).fill(0)); const Xty=Array(m).fill(0); for(let i=0;i<n;i++){ for(let a=0;a<m;a++){ const Xa=X[i][a]; Xty[a]+=Xa*y[i]; for(let b=0;b<m;b++) XtX[a][b]+=Xa*X[i][b]; } } const coeffs = solveSymmetric(XtX,Xty); const yhat = x.map(v=>polyval(coeffs,v)); const ybar = mean(y); const ssRes = y.reduce((s,yi,i)=>s + (yi-yhat[i])**2, 0); const ssTot = y.reduce((s,yi)=> s + (yi-ybar)**2, 0); const r2 = 1 - ssRes/ssTot; return {coeffs, r2}; }
+function polyval(coeffs,x){ let s=0; const m=coeffs.length; for(let i=0;i<m;i++) s += coeffs[i]*Math.pow(x, m-1-i); return s; }
+function solveSymmetric(A,b){ const n=A.length; A=A.map(r=>r.slice()); b=b.slice(); for(let i=0;i<n;i++){ let piv=i; for(let r=i+1;r<n;r++) if(Math.abs(A[r][i])>Math.abs(A[piv][i])) piv=r; if(piv!==i){ [A[i],A[piv]]=[A[piv],A[i]]; [b[i],b[piv]]=[b[piv],b[i]]; } const div=A[i][i]||1e-12; for(let j=i;j<n;j++) A[i][j]/=div; b[i]/=div; for(let r=0;r<n;r++) if(r!==i){ const f=A[r][i]; if(!f) continue; for(let c=i;c<n;c++) A[r][c]-=f*A[i][c]; b[r]-=f*b[i]; } } return b; }
+
+// initial draw
+refreshAll();
+
+</script>
+</body>
+</html>
